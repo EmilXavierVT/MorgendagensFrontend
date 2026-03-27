@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 const DESIGN_WIDTH = 1146;
 const DESIGN_HEIGHT = 2100;
@@ -174,10 +175,11 @@ export default function CateringPage() {
         <div style={{ position: "absolute", width: "1202px", height: "265px", left: "-28px", top: "0px" }}>
           <div style={{ position: "absolute", width: "1202px", height: "40px", left: "0px", top: "0px", background: "#0696FF" }} />
           {/* Home icon */}
-          <svg width="28" height="31" viewBox="0 0 28 31" fill="none" xmlns="http://www.w3.org/2000/svg"
-            style={{ position: "absolute", left: "75px", top: "5px" }}>
-            <path d="M9.75 29.5833V15.4167H18.25V29.5833M1.25 11.1667L14 1.25L26.75 11.1667V26.75C26.75 27.5014 26.4515 28.2221 25.9201 28.7535C25.3888 29.2848 24.6681 29.5833 23.9167 29.5833H4.08333C3.33189 29.5833 2.61122 29.2848 2.07986 28.7535C1.54851 28.2221 1.25 27.5014 1.25 26.75V11.1667Z" stroke="#1E1E1E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
+          <Link href="/" style={{ position: "absolute", left: "75px", top: "5px" }}>
+            <svg width="28" height="31" viewBox="0 0 28 31" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9.75 29.5833V15.4167H18.25V29.5833M1.25 11.1667L14 1.25L26.75 11.1667V26.75C26.75 27.5014 26.4515 28.2221 25.9201 28.7535C25.3888 29.2848 24.6681 29.5833 23.9167 29.5833H4.08333C3.33189 29.5833 2.61122 29.2848 2.07986 28.7535C1.54851 28.2221 1.25 27.5014 1.25 26.75V11.1667Z" stroke="#1E1E1E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </Link>
           {/* Catering icon (active) */}
           <svg width="34" height="34" viewBox="0 0 512 512" fill="#1E1E1E" xmlns="http://www.w3.org/2000/svg"
             style={{ position: "absolute", left: "118px", top: "3px" }}>
