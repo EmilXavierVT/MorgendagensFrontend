@@ -256,6 +256,7 @@ export default function CateringPage() {
             <button onClick={handleAdd} style={{
               flex: 1, background: "#FF00FF", border: "none", borderRadius: "10px",
               padding: "14px 16px",
+
               fontFamily: "var(--font-azeret-mono), 'Azeret Mono', monospace",
               fontWeight: 800, fontStyle: "italic", fontSize: "18px", color: "#1E1E1E",
               cursor: "pointer", zIndex: 10
