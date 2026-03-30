@@ -6,6 +6,7 @@ export async function GET() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "emilxavierthorsen@gmail.com", password: "1234" }),
+      signal: AbortSignal.timeout(8000),
     });
 
     console.log("[products] login status:", loginRes.status);
@@ -21,6 +22,7 @@ export async function GET() {
 
     const productsRes = await fetch("https://morgendagens.project-ice.dk/api/product/all", {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(8000),
     });
 
     console.log("[products] products status:", productsRes.status);

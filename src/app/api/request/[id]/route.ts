@@ -10,7 +10,7 @@ export async function GET(
   try {
     const res = await fetch(
       `https://morgendagens.project-ice.dk/api/request/${id}`,
-      { headers: { Authorization: authHeader ?? "" } }
+      { headers: { Authorization: authHeader ?? "" }, signal: AbortSignal.timeout(8000) }
     );
     if (!res.ok) {
       return NextResponse.json({ error: "Failed to fetch request" }, { status: res.status });
