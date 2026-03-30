@@ -129,17 +129,11 @@ export default function CateringPage() {
   useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const loginRes = await fetch("https://morgendagens.project-ice.dk/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: "emilxavierthorsen@gmail.com", password: "1234" }),
-        });
-        const { token } = await loginRes.json();
-        const productsRes = await fetch("https://morgendagens.project-ice.dk/api/product/all", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await productsRes.json();
-        setProducts(data);
+        const res = await fetch("/api/products");
+        const data = await res.json();
+        console.log("[catering] products response:", data);
+        const list = Array.isArray(data) ? data : (Array.isArray(data.products) ? data.products : Array.isArray(data.data) ? data.data : []);
+        setProducts(list);
       } catch (e) {
         console.error("Failed to fetch products", e);
       }
