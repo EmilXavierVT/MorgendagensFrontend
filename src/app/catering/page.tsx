@@ -1,24 +1,26 @@
 "use client";
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import Navbar from "../components/Navbar";
+import { getToken, getUserId, setToken, setUserId, logout } from "@/lib/token";
 
 const DESIGN_WIDTH = 1146;
 const DESIGN_HEIGHT = 2100;
 
-function CalendarWidget({ onDateSelect }: { onDateSelect: (date: string) => void }) {
+function CalendarWidget({ onRangeSelect }: { onRangeSelect: (start: string, end: string) => void }) {
   const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const [month, setMonth] = useState(8);
-  const [year, setYear] = useState(2025);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [month, setMonth] = useState(new Date().getMonth());
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
+
+  const toStr = (y: number, m: number, d: number) =>
+    `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
   const getDays = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
   const getFirst = (y: number, m: number) => new Date(y, m, 1).getDay();
 
-  const totalDays = getDays(year, month);
-  const firstDay = getFirst(year, month);
-
-  const cells: (number | null)[] = Array(firstDay).fill(null);
-  for (let d = 1; d <= totalDays; d++) cells.push(d);
+  const cells: (number | null)[] = Array(getFirst(year, month)).fill(null);
+  for (let d = 1; d <= getDays(year, month); d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
 
   const rows: (number | null)[][] = [];
@@ -29,6 +31,29 @@ function CalendarWidget({ onDateSelect }: { onDateSelect: (date: string) => void
 
   const today = new Date();
   const isToday = (d: number | null) => d !== null && d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+
+  const handleClick = (day: number) => {
+    const str = toStr(year, month, day);
+    if (!startDate || (startDate && endDate)) {
+      setStartDate(str);
+      setEndDate(null);
+    } else {
+      if (str < startDate) {
+        setStartDate(str);
+      } else {
+        setEndDate(str);
+        onRangeSelect(startDate, str);
+      }
+    }
+  };
+
+  const isStart = (d: number | null) => d !== null && toStr(year, month, d) === startDate;
+  const isEnd = (d: number | null) => d !== null && toStr(year, month, d) === endDate;
+  const isInRange = (d: number | null) => {
+    if (!d || !startDate || !endDate) return false;
+    const str = toStr(year, month, d);
+    return str > startDate && str < endDate;
+  };
 
   return (
     <div style={{ fontFamily: "Arial, sans-serif" }}>
@@ -51,17 +76,17 @@ function CalendarWidget({ onDateSelect }: { onDateSelect: (date: string) => void
         <div key={ri} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", textAlign: "center", marginBottom: "4px" }}>
           {row.map((day, di) => (
             <div key={di}
-              onClick={() => { if (day) { setSelected(day); onDateSelect(`${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`); } }}
+              onClick={() => { if (day) handleClick(day); }}
               style={{
                 width: "34px", height: "34px",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 margin: "0 auto",
                 borderRadius: "50%",
                 cursor: day ? "pointer" : "default",
-                background: day === selected ? "#333" : "transparent",
-                color: day === selected ? "#fff" : day ? "#333" : "transparent",
+                background: isStart(day) || isEnd(day) ? "#333" : isInRange(day) ? "#bbb" : "transparent",
+                color: isStart(day) || isEnd(day) ? "#fff" : day ? "#333" : "transparent",
                 fontSize: "14px",
-                border: isToday(day) && day !== selected ? "2px solid #333" : "2px solid transparent",
+                border: isToday(day) && !isStart(day) && !isEnd(day) ? "2px solid #333" : "2px solid transparent",
               }}
             >{day ?? ""}</div>
           ))}
@@ -112,12 +137,24 @@ function TimePicker({ value, onChange }: { value: { h: number; m: number }; onCh
 
 export default function CateringPage() {
   const [scale, setScale] = useState(1);
-  const [selectedDate, setSelectedDate] = useState("");
-  const [product, setProduct] = useState("");
+  const [mounted, setMounted] = useState(false);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState<{ id: number; name: string } | null>(null);
   const [antal, setAntal] = useState("");
   const [time, setTime] = useState({ h: 0, m: 0 });
-  const [orderItems, setOrderItems] = useState<string[]>([]);
+  const [orderItems, setOrderItems] = useState<{ display: string; productId: number; time: string }[]>([]);
+  const [location, setLocation] = useState("");
+  const [email, setEmail] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
+  const [success, setSuccess] = useState(false);
+  const [allergies, setAllergies] = useState("");
+  const [requestId, setRequestId] = useState<number | null>(null);
+  const [requestData, setRequestData] = useState<Record<string, unknown> | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     const update = () => setScale(window.innerWidth / DESIGN_WIDTH);
@@ -142,16 +179,116 @@ export default function CateringPage() {
   }, []);
 
   const handleAdd = () => {
-    if (product.trim()) {
+    if (selectedProduct) {
       const hh = String(time.h).padStart(2, "0");
       const mm = String(time.m).padStart(2, "0");
-      const formattedTime = ` @ ${hh}:${mm}`;
-      setOrderItems(prev => [...prev.slice(0, 4), `${antal ? antal + "x " : ""}${product}${formattedTime}`].slice(-5));
-      setProduct("");
+      const timeStr = `${hh}:${mm}:00`;
+      const display = `${antal ? antal + "x " : ""}${selectedProduct.name} kl ${hh}:${mm}`;
+      setOrderItems(prev => [...prev, { display, productId: selectedProduct.id, time: timeStr }]);
+      setSelectedProduct(null);
       setAntal("");
       setTime({ h: 0, m: 0 });
     }
   };
+
+  const handleSend = async () => {
+    if (!startDate || !endDate || !location) { setSendError("Udfyld dato og lokation."); return; }
+    setSending(true); setSendError("");
+    try {
+      let token = getToken();
+      let tenantId = null;
+
+      if (token) {
+        const userId = getUserId();
+        if (userId) {
+          const uRes = await fetch(`/api/user/${userId}`, { headers: { Authorization: `Bearer ${token}` } });
+          if (uRes.ok) {
+            const u = await uRes.json();
+            tenantId = u.tenantId;
+          } else if (uRes.status === 401) {
+            logout();
+            token = null;
+          }
+        }
+      }
+
+      if (!token) {
+        if (!email) { setSendError("Indtast din email for at fortsætte."); setSending(false); return; }
+        const regRes = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: "changeme123" }),
+        });
+        const regData = await regRes.json();
+        console.log("register response:", regData);
+        if (!regRes.ok) { setSendError(regData.error ?? "Registrering fejlede."); setSending(false); return; }
+        tenantId = regData.tenantId ?? regData.tenant_id ?? null;
+        const regUserId = regData.userId ?? regData.id ?? null;
+
+        const loginRes = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: "changeme123" }),
+        });
+        const loginData = await loginRes.json();
+        if (!loginRes.ok) { setSendError(loginData.error ?? "Login fejlede."); setSending(false); return; }
+        token = loginData.token ?? loginData.accessToken ?? loginData.access_token ?? null;
+        if (token) setToken(token);
+        if (regUserId) setUserId(String(regUserId));
+        if (!token) { setSendError("Kunne ikke hente token."); setSending(false); return; }
+      }
+
+      const reqRes = await fetch("/api/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          tenantId,
+          startDate: `${startDate}T00:00:00`,
+          endDate: `${endDate}T00:00:00`,
+          location,
+          status: 1,
+          type: 1,
+          productInRequestIds: [],
+        }),
+      });
+      if (!reqRes.ok) { const d = await reqRes.json(); setSendError(d.error ?? "Noget gik galt."); setSending(false); return; }
+      const reqData = await reqRes.json();
+      const requestId = reqData.id;
+
+      await Promise.all(orderItems.map(item =>
+        fetch("/api/product-in-request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ requestId, productId: item.productId, time: item.time }),
+        })
+      ));
+
+      setRequestId(requestId);
+      setRequestData(reqData);
+      setSuccess(true);
+    } catch (e) {
+      console.error("Send error", e);
+      setSendError("Noget gik galt.");
+    }
+    setSending(false);
+  };
+
+  const handleSendAllergies = async () => {
+    if (!allergies.trim() || !requestId) return;
+    const token = getToken();
+    try {
+      await fetch(`/api/request/${requestId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token ?? ""}` },
+        body: JSON.stringify({ ...requestData, allergies }),
+      });
+    } catch (e) {
+      console.error("Send allergies error", e);
+    }
+    window.location.reload();
+  };
+
+  if (!mounted) return null;
 
   return (
     <div style={{ width: "100vw", height: `${DESIGN_HEIGHT * scale}px`, overflow: "hidden" }}>
@@ -166,28 +303,7 @@ export default function CateringPage() {
       }}>
 
         {/* ── NAV BAR ── */}
-        <div style={{ position: "absolute", width: "1202px", height: "265px", left: "-28px", top: "0px" }}>
-          <div style={{ position: "absolute", width: "1202px", height: "40px", left: "0px", top: "0px", background: "#0696FF" }} />
-          {/* Home icon */}
-          <Link href="/" style={{ position: "absolute", left: "75px", top: "5px" }}>
-            <svg width="28" height="31" viewBox="0 0 28 31" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M9.75 29.5833V15.4167H18.25V29.5833M1.25 11.1667L14 1.25L26.75 11.1667V26.75C26.75 27.5014 26.4515 28.2221 25.9201 28.7535C25.3888 29.2848 24.6681 29.5833 23.9167 29.5833H4.08333C3.33189 29.5833 2.61122 29.2848 2.07986 28.7535C1.54851 28.2221 1.25 27.5014 1.25 26.75V11.1667Z" stroke="#1E1E1E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </Link>
-          {/* Catering icon (active) */}
-          <svg width="34" height="34" viewBox="0 0 512 512" fill="#1E1E1E" xmlns="http://www.w3.org/2000/svg"
-            style={{ position: "absolute", left: "118px", top: "3px" }}>
-            <g><g><path d="M435.745,147.064H283.833c-4.513,0-8.17,3.658-8.17,8.17s3.657,8.17,8.17,8.17h151.911c4.513,0,8.17-3.658,8.17-8.17S440.258,147.064,435.745,147.064z"/></g></g>
-            <g><g><path d="M495.775,212.426h-19.179v-81.702h2.723c4.513,0,8.17-3.658,8.17-8.17c0-4.512-3.657-8.17-8.17-8.17h-13.929c-3.979-52.066-45.665-93.752-97.731-97.731V8.17c0-4.512-3.657-8.17-8.17-8.17s-8.17,3.658-8.17,8.17v8.482c-52.066,3.979-93.752,45.665-97.731,97.731H239.66c-4.513,0-8.17,3.658-8.17,8.17c0,4.512,3.657,8.17,8.17,8.17h2.723v81.702H185.17c3.575-4.753,6.141-10.306,7.371-16.34h3.545c4.513,0,8.17-3.658,8.17-8.17s-3.657-8.17-8.17-8.17H185.17c3.575-4.753,6.141-10.306,7.371-16.34h3.545c4.513,0,8.17-3.658,8.17-8.17s-3.657-8.17-8.17-8.17H185.17c3.575-4.753,6.141-10.306,7.371-16.34h3.545c4.513,0,8.17-3.658,8.17-8.17c0-4.512-3.657-8.17-8.17-8.17H185.17c3.575-4.753,6.141-10.306,7.371-16.34h3.545c4.513,0,8.17-3.658,8.17-8.17c0-4.512-3.657-8.17-8.17-8.17H32.681c-4.513,0-8.17,3.658-8.17,8.17c0,4.512,3.657,8.17,8.17,8.17h3.546c1.23,6.034,3.794,11.588,7.371,16.34H32.681c-4.513,0-8.17,3.658-8.17,8.17c0,4.512,3.657,8.17,8.17,8.17h3.546c1.23,6.034,3.794,11.588,7.371,16.34H32.681c-4.513,0-8.17,3.658-8.17,8.17s3.657,8.17,8.17,8.17h3.546c1.23,6.034,3.794,11.588,7.371,16.34H32.681c-4.513,0-8.17,3.658-8.17,8.17s3.657,8.17,8.17,8.17h3.546c1.23,6.034,3.794,11.588,7.371,16.34H16.225c-4.513,0-8.17,3.658-8.17,8.17v65.362c0,4.512,3.657,8.17,8.17,8.17h403.269c4.513,0,8.17-3.658,8.17-8.17s-3.657-8.17-8.17-8.17H24.395v-49.021h463.211v49.021h-35.431c-4.513,0-8.17,3.658-8.17,8.17s3.657,8.17,8.17,8.17h32.59v168.48c-12.302-1.192-19.384-5.099-27.371-9.506c-10.119-5.582-21.587-11.91-43.435-11.91c-21.848,0-33.317,6.328-43.435,11.91c-9.606,5.3-17.903,9.877-35.543,9.877c-17.64,0-25.938-4.577-35.544-9.877c-10.119-5.582-21.587-11.91-43.437-11.91s-33.318,6.328-43.437,11.91c-9.606,5.3-17.904,9.877-35.544,9.877c-17.639,0-25.937-4.577-35.542-9.877c-10.118-5.582-21.586-11.91-43.434-11.91c-21.848,0-33.317,6.328-43.435,11.91c-2.276,1.255-4.479,2.466-6.75,3.589c-5.705,2.821-11.829,5.064-20.623,5.916V318.638c0-4.512-3.657-8.17-8.17-8.17c-4.513,0-8.17,3.658-8.17,8.17v152.511c0,4.512,3.657,8.17,8.17,8.17c10.095,0,17.957-1.359,24.511-3.363v27.873c0,4.512,3.657,8.17,8.17,8.17c4.513,0,8.17-3.658,8.17-8.17v-35.004c0.873-0.475,1.736-0.948,2.585-1.416c9.606-5.3,17.903-9.877,35.542-9.877c17.639,0,25.936,4.578,35.54,9.876c10.118,5.583,21.586,11.911,43.435,11.911c21.85,0,33.318-6.328,43.437-11.91c9.606-5.3,17.904-9.877,35.544-9.877s25.938,4.578,35.544,9.877c10.119,5.583,21.587,11.91,43.437,11.91c21.849,0,33.318-6.328,43.436-11.91c9.606-5.3,17.903-9.877,35.542-9.877s25.936,4.578,35.54,9.876c0.849,0.468,1.711,0.941,2.584,1.416v35.006c0,4.512,3.657,8.17,8.17,8.17s8.17-3.658,8.17-8.17v-27.875c6.554,2.004,14.415,3.364,24.511,3.364c4.513,0,8.17-3.658,8.17-8.17V292.143c1.737-1.498,2.841-3.71,2.841-6.185v-65.362C503.945,216.084,500.288,212.426,495.775,212.426z M152.511,212.426H76.255c-10.651,0-19.733-6.831-23.105-16.34h122.466C172.243,205.594,163.161,212.426,152.511,212.426z M152.511,179.745H76.255c-10.651,0-19.733-6.831-23.105-16.34h122.466C172.243,172.913,163.161,179.745,152.511,179.745z M152.511,147.064H76.255c-10.651,0-19.733-6.831-23.105-16.34h122.466C172.243,140.232,163.161,147.064,152.511,147.064z M152.511,114.383H76.255c-10.651,0-19.733-6.831-23.105-16.34h122.466C172.243,107.552,163.161,114.383,152.511,114.383z M359.489,32.681c46.8,0,85.341,35.963,89.484,81.702H270.005C274.149,68.644,312.689,32.681,359.489,32.681z M460.255,212.426H258.723v-81.702h201.532V212.426z"/></g></g>
-            <g><g><circle cx="446.638" cy="373.106" r="8.17"/></g></g>
-            <g><g><circle cx="413.957" cy="405.787" r="8.17"/></g></g>
-          </svg>
-          {/* User icon */}
-          <svg width="31" height="34" viewBox="0 0 31 34" fill="none" xmlns="http://www.w3.org/2000/svg"
-            style={{ position: "absolute", left: "1133px", top: "3px" }}>
-            <path d="M28.4167 31.75V28.4167C28.4167 26.6486 27.7143 24.9529 26.464 23.7026C25.2138 22.4524 23.5181 21.75 21.75 21.75H8.41667C6.64856 21.75 4.95286 22.4524 3.70262 23.7026C2.45238 24.9529 1.75 26.6486 1.75 28.4167V31.75M21.75 8.41667C21.75 12.0986 18.7652 15.0833 15.0833 15.0833C11.4014 15.0833 8.41667 12.0986 8.41667 8.41667C8.41667 4.73477 11.4014 1.75 15.0833 1.75C18.7652 1.75 21.75 4.73477 21.75 8.41667Z" stroke="#1E1E1E" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </div>
+        <Navbar activePage="catering" />
 
         {/* ── HERO IMAGE ── */}
         <div style={{
@@ -203,24 +319,153 @@ export default function CateringPage() {
           <path d="M778.503 658.168L760.162 784.206L752.811 912.996L684.881 1015.73L644.477 1130.79L591.859 1249.6L478.979 1264.76L384.508 1311L282.995 1287.58L184.278 1238.62L118.144 1136.79L41.4362 1041.54L33.2522 906.745L32.8901 780.046L9.46321 658.168L5.74882 531.592L0 397.396L71.0897 292.725L110.291 172.138L192.824 90.8783L274.117 0L384.508 10.2411L477.06 57.7946L579.652 85.5578L648.7 181.58L702.944 289.696L729.415 411.92L781 528.516L778.503 658.168Z" fill="#EFEFEF"/>
         </svg>
 
+        {/* ── SUCCESS OVERLAY ── */}
+        {success && (
+          <div style={{ position: "absolute", left: "35px", top: "380px", zIndex: 20 }}>
+
+            <svg width="781" height="1311" viewBox="0 0 781 1311" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M778.503 658.168L760.162 784.206L752.811 912.996L684.881 1015.73L644.477 1130.79L591.859 1249.6L478.979 1264.76L384.508 1311L282.995 1287.58L184.278 1238.62L118.144 1136.79L41.4362 1041.54L33.2522 906.745L32.8901 780.046L9.46321 658.168L5.74882 531.592L0 397.396L71.0897 292.725L110.291 172.138L192.824 90.8783L274.117 0L384.508 10.2411L477.06 57.7946L579.652 85.5578L648.7 181.58L702.944 289.696L729.415 411.92L781 528.516L778.503 658.168Z" fill="#EFEFEF"/>
+              {/* white rect for allergies */}
+              <rect x="121" y="476" width="447" height="251" rx="10" fill="#FFFFFF"/>
+            </svg>
+            {/* Bottom decoration */}
+            <div style={{ position: "absolute", left: "64px", top: "870px" }}>
+              <svg width="654" height="407" viewBox="0 0 654 407" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <g clipPath="url(#clip0_91_681)"><path d="M373.203 158.231L356.599 157.457L345.215 145.119L331.932 135.887L327.155 120.45L322.6 104.885L327.276 89.3551L330.559 72.9811L341.492 60.0371L356.316 51.5281L373.203 51.7761L390.135 51.4001L403.242 62.1081L413.92 74.2471L422.208 88.4531L425.364 104.885L419.182 120.43L412.331 134.48L403.322 147.761L389.967 157.903L373.203 158.231Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip1_91_681)"><path d="M311.103 405.231L294.499 404.457L283.115 392.119L269.832 382.887L265.055 367.45L260.5 351.885L265.176 336.355L268.459 319.981L279.392 307.037L294.216 298.528L311.103 298.776L328.035 298.4L341.142 309.108L351.82 321.247L360.108 335.453L363.264 351.885L357.082 367.43L350.231 381.48L341.222 394.761L327.867 404.903L311.103 405.231Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip2_91_681)"><path d="M345.148 32.394L342.482 45.681L329.523 50.487L319.441 59.062L306.322 60.063L293.509 63.279L280.716 59.943L267.071 60.57L254.477 55.367L243.89 46.167L242.1 32.394L243.785 18.542L255.832 11.611L267.782 6.333L280.249 1.775L293.509 0L306.311 4.792L318.651 8.077L331.252 11.507L342.849 18.831L345.148 32.394Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip3_91_681)"><path d="M528.448 59.094L525.782 72.381L512.823 77.187L502.741 85.762L489.622 86.763L476.809 89.979L464.016 86.643L450.371 87.27L437.777 82.067L427.19 72.867L425.4 59.094L427.085 45.242L439.132 38.311L451.082 33.033L463.549 28.475L476.809 26.7L489.611 31.492L501.951 34.777L514.552 38.207L526.149 45.531L528.448 59.094Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip4_91_681)"><path d="M578.348 223.494L575.682 236.781L562.723 241.587L552.641 250.162L539.522 251.163L526.709 254.379L513.916 251.043L500.271 251.67L487.677 246.467L477.09 237.267L475.3 223.494L476.985 209.642L489.032 202.711L500.982 197.433L513.449 192.875L526.709 191.1L539.511 195.892L551.851 199.177L564.452 202.607L576.049 209.931L578.348 223.494Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip5_91_681)"><path d="M85.1434 132.228L102.063 126.728L118.989 122L135.909 129.013L152.838 121.941L169.349 124.976L173.6 134.079L157.627 144.722L138.204 147.35L128.293 172.546L104.829 166.055L92.7213 176.7L78.384 165.771L66.0709 164.62L46.2782 162.514L31.4477 148.827L10.9727 148.616L0 126.423L1.6006 128.18L17.4432 116.228L34.3645 114.6L51.2858 115.089L68.7471 122.287L85.1434 132.228Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip6_91_681)"><path d="M296.88 265.098L308.064 261.76L319.252 258.891L330.436 263.147L341.626 258.855L352.54 260.697L355.35 266.221L344.792 272.68L331.953 274.275L325.402 289.565L309.892 285.626L301.889 292.086L292.412 285.454L284.273 284.755L271.19 283.477L261.387 275.171L247.853 275.043L240.6 261.575L241.658 262.641L252.13 255.388L263.315 254.4L274.5 254.697L286.042 259.065L296.88 265.098Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip7_91_681)"><path d="M595.28 71.5979L606.464 68.2599L617.652 65.3909L628.836 69.6469L640.026 65.3549L650.94 67.1969L653.75 72.7209L643.192 79.1799L630.353 80.7749L623.802 96.0649L608.292 92.1259L600.289 98.5859L590.812 91.9539L582.673 91.2549L569.59 89.9769L559.787 81.6709L546.253 81.5429L539 68.0749L540.058 69.1409L550.53 61.8879L561.715 60.8999L572.9 61.1969L584.442 65.5649L595.28 71.5979Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip8_91_681)"><path d="M182.281 262.085L194.231 262.93L206.088 264.136L209.09 276.325L208.132 289.279L197.34 303.095L185.093 315.852L175.616 330.585L162.694 342.797L145.7 340.827L152.791 322.936L148.108 305.67L152.53 287.909L150.907 270.446L150.569 258.441L160.013 254.94L172.738 254L182.281 262.085Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip9_91_681)"><path d="M349.981 173.685L361.931 174.53L373.788 175.736L376.79 187.925L375.832 200.879L365.04 214.695L352.793 227.452L343.316 242.185L330.394 254.397L313.4 252.427L320.491 234.536L315.808 217.27L320.23 199.509L318.607 182.046L318.269 170.041L327.713 166.54L340.438 165.6L349.981 173.685Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip10_91_681)"><path d="M511.881 271.085L523.831 271.93L535.688 273.136L538.69 285.325L537.732 298.279L526.94 312.095L514.693 324.852L505.216 339.585L492.294 351.797L475.3 349.827L482.391 331.936L477.708 314.67L482.13 296.909L480.507 279.446L480.169 267.441L489.613 263.94L502.338 263L511.881 271.085Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip11_91_681)"><path d="M202.057 128.041L191.176 130.323L184.033 121.175L173.833 117.054L168.115 107.877L159.989 100.673L156.238 90.4511L148.047 82.6711L143.3 72.8651L139.901 62.4451L140.9 51.2561L138.3 40.0661L146.511 31.8331L156.862 31.6001L167.094 35.3371L175.945 41.8051L180.485 52.1821L186.565 60.7851L193.983 68.6591L200.882 77.2121L201.42 88.6171L205.881 98.3001L208.899 108.655L206.797 119.183L202.057 128.041Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip12_91_681)"><path d="M51.9401 207.525L44.8069 209.494L39.5868 204.48L32.584 202.617L28.3117 197.505L22.5349 193.698L19.5202 187.855L13.671 183.711L10.0138 178.171L7.22353 172.19L7.3242 165.505L5.02734 159.023L10.0815 153.679L16.9651 152.954L23.9698 154.587L30.1924 157.917L33.7405 163.807L38.225 168.558L43.564 172.802L48.5915 177.478L49.5256 184.204L52.9861 189.688L55.5193 195.651L54.6505 202.008L51.9401 207.525Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip13_91_681)"><path d="M209.457 244.341L198.576 246.623L191.433 237.475L181.233 233.354L175.515 224.177L167.389 216.973L163.638 206.751L155.447 198.971L150.7 189.165L147.301 178.745L148.3 167.556L145.7 156.366L153.911 148.133L164.262 147.9L174.494 151.637L183.345 158.105L187.885 168.482L193.965 177.085L201.383 184.959L208.282 193.512L208.82 204.917L213.281 214.6L216.299 224.955L214.197 235.483L209.457 244.341Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip14_91_681)"><path d="M196.742 377.041L207.623 379.323L214.766 370.175L224.966 366.054L230.684 356.877L238.81 349.673L242.561 339.451L250.752 331.671L255.499 321.865L258.898 311.445L257.899 300.256L260.499 289.066L252.288 280.833L241.937 280.6L231.705 284.337L222.854 290.805L218.314 301.182L212.234 309.785L204.816 317.659L197.917 326.212L197.379 337.617L192.918 347.3L189.9 357.655L192.002 368.183L196.742 377.041Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip15_91_681)"><path d="M588.957 195.041L578.076 197.323L570.933 188.175L560.733 184.054L555.015 174.877L546.889 167.673L543.138 157.451L534.947 149.671L530.2 139.865L526.801 129.445L527.8 118.256L525.2 107.066L533.411 98.8331L543.762 98.6001L553.994 102.337L562.845 108.805L567.385 119.182L573.465 127.785L580.883 135.659L587.782 144.212L588.32 155.617L592.781 165.3L595.799 175.655L593.697 186.183L588.957 195.041Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip16_91_681)"><path d="M313.071 161.697L308.628 177.655L305.554 194.149L295.113 206.283L288.011 220.461L279.276 234.921L264.496 235.016L251.572 239.424L238.893 234.73L226.996 226.786L220.165 212.559L211.866 199.006L213.039 181.481L215.086 165.13L214.084 149.02L215.698 132.629L217.175 115.222L228.054 102.89L235.093 87.9793L247.058 78.8564L259.023 68.4721L273.063 71.613L284.19 79.2735L296.937 84.5464L304.238 98.0724L309.433 112.915L310.821 129.119L315.534 145.012L313.071 161.697Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip17_91_681)"><path d="M464.323 276.704L461.943 293.097L460.989 309.848L452.174 323.21L446.931 338.175L440.103 353.628L425.455 355.6L413.196 361.614L400.023 358.568L387.213 352.2L378.631 338.956L368.677 326.567L367.615 309.035L367.568 292.556L364.528 276.704L364.046 260.241L363.3 242.787L372.525 229.173L377.612 213.489L388.322 202.92L398.871 191.1L413.196 192.432L425.206 198.617L438.519 202.228L447.479 214.717L454.518 228.779L457.953 244.676L464.647 259.841L464.323 276.704Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip18_91_681)"><path d="M120.215 92.695L111.82 103.074L98.4278 104.453L86.0558 108.407L73.8158 104.065L61.5548 99.643L53.4798 89.41L44.1338 79.798L40.3998 66.725L41.4028 53.026L49.2988 41.999L57.1178 30.87L70.3158 27.622L83.2698 26.7L96.3848 28.231L108.524 33.939L115.915 45.148L122.159 56.073L126.964 68.038L127.682 81.4869L120.215 92.695Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip19_91_681)"><path d="M150.799 222.169L149.299 231.764L146.905 241.843L140.564 250.249L132.392 257.154L121.216 257.411L112.017 263.023L101.571 261.535L91.7829 258.779L80.4409 260.033L70.3729 255.602L66.0809 244.582L59.6259 236.964L56.9709 227.41L53.3999 217.619L54.6829 207.129L60.8219 198.549L65.9239 189.081L75.5079 184.291L84.3079 178.003L94.9809 176.7L105.483 177.776L115.826 178.605L125.957 181.311L136.21 184.944L142.287 194.113L148.241 202.497L153.207 211.764L150.799 222.169Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip20_91_681)"><path d="M522.799 150.269L521.299 159.864L518.905 169.943L512.564 178.349L504.392 185.254L493.216 185.511L484.017 191.123L473.571 189.635L463.783 186.879L452.441 188.133L442.373 183.702L438.081 172.682L431.626 165.064L428.971 155.51L425.4 145.719L426.683 135.229L432.822 126.649L437.924 117.181L447.508 112.391L456.308 106.103L466.981 104.8L477.483 105.876L487.826 106.705L497.957 109.411L508.21 113.044L514.287 122.213L520.241 130.597L525.207 139.864L522.799 150.269Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip21_91_681)"><path d="M103.82 305.024L92.8439 286.84L96.2821 275.978L116.362 272.355L136.755 270.608L145.086 280.944L139.262 300.626L129.315 318.573L118.506 320.228L103.82 305.024Z" fill="#FF1DFF"/></g>
+                <g clipPath="url(#clip22_91_681)"><path d="M238.146 394.416L218.941 385.18L215.397 376.191L229.235 366.615L244.403 358.277L256.979 362.8L263.723 378.947L266.194 395.281L258.575 400.224L238.146 394.416Z" fill="#FF1DFF"/></g>
+                <defs>
+                  <clipPath id="clip0_91_681"><rect width="102.764" height="106.831" fill="white" transform="translate(322.6 51.4001)"/></clipPath>
+                  <clipPath id="clip1_91_681"><rect width="102.764" height="106.831" fill="white" transform="translate(260.5 298.4)"/></clipPath>
+                  <clipPath id="clip2_91_681"><rect width="103.048" height="63.279" fill="white" transform="translate(242.1)"/></clipPath>
+                  <clipPath id="clip3_91_681"><rect width="103.048" height="63.279" fill="white" transform="translate(425.4 26.7)"/></clipPath>
+                  <clipPath id="clip4_91_681"><rect width="103.048" height="63.279" fill="white" transform="translate(475.3 191.1)"/></clipPath>
+                  <clipPath id="clip5_91_681"><rect width="173.6" height="62.1" fill="white" transform="translate(0 114.6)"/></clipPath>
+                  <clipPath id="clip6_91_681"><rect width="114.75" height="37.686" fill="white" transform="translate(240.6 254.4)"/></clipPath>
+                  <clipPath id="clip7_91_681"><rect width="114.75" height="37.686" fill="white" transform="translate(539 60.8999)"/></clipPath>
+                  <clipPath id="clip8_91_681"><rect width="63.39" height="88.797" fill="white" transform="translate(145.7 254)"/></clipPath>
+                  <clipPath id="clip9_91_681"><rect width="63.39" height="88.797" fill="white" transform="translate(313.4 165.6)"/></clipPath>
+                  <clipPath id="clip10_91_681"><rect width="63.39" height="88.797" fill="white" transform="translate(475.3 263)"/></clipPath>
+                  <clipPath id="clip11_91_681"><rect width="70.599" height="98.723" fill="white" transform="translate(138.3 31.6001)"/></clipPath>
+                  <clipPath id="clip12_91_681"><rect width="47.2" height="58.7" fill="white" transform="translate(3.69995 155.707) rotate(-4.87017)"/></clipPath>
+                  <clipPath id="clip13_91_681"><rect width="70.599" height="98.723" fill="white" transform="translate(145.7 147.9)"/></clipPath>
+                  <clipPath id="clip14_91_681"><rect width="70.599" height="98.723" fill="white" transform="matrix(-1 0 0 1 260.499 280.6)"/></clipPath>
+                  <clipPath id="clip15_91_681"><rect width="70.599" height="98.723" fill="white" transform="translate(525.2 98.6001)"/></clipPath>
+                  <clipPath id="clip16_91_681"><rect width="101.347" height="170.514" fill="white" transform="translate(223.44 66.0537) rotate(7.29788)"/></clipPath>
+                  <clipPath id="clip17_91_681"><rect width="101.347" height="170.514" fill="white" transform="translate(363.3 191.1)"/></clipPath>
+                  <clipPath id="clip18_91_681"><rect width="87.282" height="81.707" fill="white" transform="translate(40.3998 26.7)"/></clipPath>
+                  <clipPath id="clip19_91_681"><rect width="99.807" height="86.323" fill="white" transform="translate(53.3999 176.7)"/></clipPath>
+                  <clipPath id="clip20_91_681"><rect width="99.807" height="86.323" fill="white" transform="translate(425.4 104.8)"/></clipPath>
+                  <clipPath id="clip21_91_681"><rect width="47.3" height="53.9" fill="white" transform="translate(86.7786 283.503) rotate(-38.3737)"/></clipPath>
+                  <clipPath id="clip22_91_681"><rect width="36.1687" height="54.2638" fill="white" transform="translate(209.103 388.292) rotate(-69.8426)"/></clipPath>
+                </defs>
+              </svg>
+            </div>
+            {/* NLMOST title */}
+            <div style={{ position: "absolute", left: "270px", top: "280px" }}>
+              <svg width="238" height="118" viewBox="0 0 238 118" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M10.7707 46.3199L14.3707 29.3999L7.17066 4.43995H18.8107L20.7307 12.4199L21.9307 20.8199L26.7907 12.2999L32.0107 4.43995H44.3107L26.1907 29.3999L22.5907 46.3199H10.7707ZM57.2341 47.0399C54.2341 47.0399 51.5741 46.3799 49.2541 45.0599C46.9341 43.6999 45.1141 41.7999 43.7941 39.3599C42.5141 36.9199 41.8741 34.0599 41.8741 30.7799C41.8741 27.2599 42.3341 23.8799 43.2541 20.6399C44.2141 17.3999 45.5941 14.5199 47.3941 11.9999C49.2341 9.43994 51.4941 7.41994 54.1741 5.93994C56.8941 4.45994 60.0341 3.71994 63.5941 3.71994C66.5941 3.71994 69.2341 4.37994 71.5141 5.69994C73.8341 6.97994 75.6341 8.81994 76.9141 11.2199C78.2341 13.6199 78.8941 16.4999 78.8941 19.8599C78.8941 23.3799 78.4341 26.7799 77.5141 30.0599C76.5941 33.2999 75.2141 36.1999 73.3741 38.7599C71.5741 41.2799 69.3141 43.2999 66.5941 44.8199C63.9141 46.2999 60.7941 47.0399 57.2341 47.0399ZM58.2541 37.4399C59.6541 37.4399 60.8941 36.9399 61.9741 35.9399C63.0941 34.9399 64.0341 33.6199 64.7941 31.9799C65.5541 30.3399 66.1341 28.5199 66.5341 26.5199C66.9341 24.4799 67.1341 22.4399 67.1341 20.3999C67.1341 18.0399 66.7141 16.2599 65.8741 15.0599C65.0341 13.8599 63.9141 13.2599 62.5141 13.2599C61.1141 13.2599 59.8741 13.7599 58.7941 14.7599C57.7141 15.7599 56.7741 17.0799 55.9741 18.7199C55.2141 20.3599 54.6341 22.1999 54.2341 24.2399C53.8341 26.2399 53.6341 28.2599 53.6341 30.2999C53.6341 31.8599 53.8341 33.1799 54.2341 34.2599C54.6341 35.2999 55.1741 36.0999 55.8541 36.6599C56.5341 37.1799 57.3341 37.4399 58.2541 37.4399ZM96.3175 47.0399C92.5575 47.0399 89.3775 46.3799 86.7775 45.0599C84.1775 43.7399 82.3175 41.8599 81.1975 39.4199C80.1175 36.9399 79.9375 33.9999 80.6575 30.5999L86.2375 4.43995H98.0575L92.3575 31.1999C92.0775 32.4799 92.0975 33.5999 92.4175 34.5599C92.7375 35.4799 93.3175 36.1999 94.1575 36.7199C94.9975 37.1999 95.9975 37.4399 97.1575 37.4399C98.3975 37.4399 99.4575 37.1999 100.338 36.7199C101.258 36.1999 102.018 35.4799 102.618 34.5599C103.218 33.5999 103.658 32.4799 103.938 31.1999L109.638 4.43995H121.458L115.818 30.8999C115.098 34.1799 113.918 37.0399 112.278 39.4799C110.678 41.8799 108.558 43.7399 105.918 45.0599C103.278 46.3799 100.078 47.0399 96.3175 47.0399ZM135.221 11.0399L137.561 -5.45979e-05H149.021L146.681 11.0399L140.141 20.9399H130.601L134.681 15.8999L141.221 11.0399H135.221ZM168.303 31.7399L170.343 22.1399H178.623C180.343 22.1399 181.723 21.7199 182.763 20.8799C183.803 20.0399 184.323 18.9399 184.323 17.5799C184.323 16.5399 183.963 15.6799 183.243 14.9999C182.563 14.3199 181.563 13.9799 180.243 13.9799H172.083L174.123 4.43995H182.703C185.583 4.43995 188.063 4.95994 190.143 5.99994C192.223 6.99994 193.823 8.41995 194.943 10.2599C196.103 12.0599 196.683 14.1799 196.683 16.6199C196.683 18.8999 196.163 20.9599 195.123 22.7999C194.123 24.6399 192.723 26.2399 190.923 27.5999C189.123 28.9199 187.003 29.9399 184.563 30.6599C182.163 31.3799 179.563 31.7399 176.763 31.7399H168.303ZM156.663 46.3199L165.603 4.43995H177.423L168.483 46.3199H156.663ZM180.063 46.3199C180.023 43.5599 179.643 40.9799 178.923 38.5799C178.243 36.1799 177.143 34.0999 175.623 32.3399C174.103 30.5799 172.103 29.2999 169.623 28.4999L182.223 25.9199C184.663 27.2399 186.583 28.9399 187.983 31.0199C189.383 33.0999 190.363 35.4399 190.923 38.0399C191.523 40.6399 191.843 43.3999 191.883 46.3199H180.063ZM196.106 46.3199L205.046 4.43995H237.086L235.046 13.9799H214.826L213.506 20.2199H226.346L224.366 29.5199H211.526L209.966 36.7199H230.486L228.446 46.3199H196.106ZM-3.91081e-05 116.32L8.87996 74.4399H22.68C25.48 74.4399 27.94 74.8999 30.06 75.8199C32.22 76.7399 34.02 77.9999 35.46 79.5999C36.9 81.1999 37.98 83.0199 38.7 85.0599C39.42 87.0999 39.78 89.2799 39.78 91.5999C39.78 95.2399 39.16 98.5799 37.92 101.62C36.72 104.62 35 107.22 32.76 109.42C30.52 111.62 27.86 113.32 24.78 114.52C21.74 115.72 18.36 116.32 14.64 116.32H-3.91081e-05ZM13.86 106.72H16.44C18.2 106.72 19.76 106.3 21.12 105.46C22.52 104.62 23.68 103.5 24.6 102.1C25.56 100.7 26.28 99.1399 26.76 97.4199C27.28 95.6599 27.54 93.8799 27.54 92.0799C27.54 89.6399 26.94 87.6799 25.74 86.1999C24.58 84.7199 22.98 83.9799 20.94 83.9799H18.66L13.86 106.72ZM57.2634 117.04C54.2634 117.04 51.6034 116.38 49.2834 115.06C46.9634 113.7 45.1434 111.8 43.8234 109.36C42.5434 106.92 41.9034 104.06 41.9034 100.78C41.9034 97.2599 42.3634 93.8799 43.2834 90.6399C44.2434 87.3999 45.6234 84.5199 47.4234 81.9999C49.2634 79.4399 51.5234 77.4199 54.2034 75.9399C56.9234 74.4599 60.0634 73.7199 63.6234 73.7199C66.6234 73.7199 69.2634 74.3799 71.5434 75.6999C73.8634 76.9799 75.6634 78.8199 76.9434 81.2199C78.2634 83.6199 78.9234 86.4999 78.9234 89.8599C78.9234 93.3799 78.4634 96.7799 77.5434 100.06C76.6234 103.3 75.2434 106.2 73.4034 108.76C71.6034 111.28 69.3434 113.3 66.6234 114.82C63.9434 116.3 60.8234 117.04 57.2634 117.04ZM58.2834 107.44C59.6834 107.44 60.9234 106.94 62.0034 105.94C63.1234 104.94 64.0634 103.62 64.8234 101.98C65.5834 100.34 66.1634 98.5199 66.5634 96.5199C66.9634 94.4799 67.1634 92.4399 67.1634 90.3999C67.1634 88.0399 66.7434 86.2599 65.9034 85.0599C65.0634 83.8599 63.9434 83.2599 62.5434 83.2599C61.1434 83.2599 59.9034 83.7599 58.8234 84.7599C57.7434 85.7599 56.8034 87.0799 56.0034 88.7199C55.2434 90.3599 54.6634 92.1999 54.2634 94.2399C53.8634 96.2399 53.6634 98.2599 53.6634 100.3C53.6634 101.86 53.8634 103.18 54.2634 104.26C54.6634 105.3 55.2034 106.1 55.8834 106.66C56.5634 107.18 57.3634 107.44 58.2834 107.44ZM78.2268 116.32L87.1068 74.4399H100.607L104.987 102.16L107.147 87.6399L109.967 74.4399H120.647L111.767 116.32H98.0268L93.5868 89.3799L91.7268 103.06L88.9068 116.32H78.2268ZM118.03 116.32L126.97 74.4399H159.01L156.97 83.9799H136.75L135.43 90.2199H148.27L146.29 99.5199H133.45L131.89 106.72H152.41L150.37 116.32H118.03ZM210.777 102.52L213.117 82.1799L214.797 74.3799H227.037L225.417 82.1799L219.117 102.52H210.777ZM206.277 116.32L208.617 105.28H220.077L217.677 116.32H206.277Z" fill="#FF1DFF"/>
+              </svg>
+
+            </div>
+            {/* Allergies label */}
+            <div style={{
+              position: "absolute", left: "130px", top: "453px",
+              fontFamily: "var(--font-azeret-mono), 'Azeret Mono', monospace",
+              fontWeight: 800, fontStyle: "italic",
+              fontSize: "14px", color: "#888",
+            }}>
+              allergier / ønsker
+            </div>
+            {/* Allergies input overlaying the white rect */}
+            <textarea
+              value={allergies}
+              onChange={e => setAllergies(e.target.value)}
+              placeholder="Skriv eventuelle allergier eller ønsker her..."
+              style={{
+                position: "absolute", left: "121px", top: "476px",
+                width: "447px", height: "251px",
+                background: "transparent", border: "none", outline: "none",
+                resize: "none", padding: "16px",
+                fontFamily: "var(--font-azeret-mono), 'Azeret Mono', monospace",
+                fontWeight: 800, fontStyle: "italic",
+                fontSize: "16px", color: "#1E1E1E",
+                boxSizing: "border-box",
+              }}
+            />
+            {/* Send allergies button */}
+            <div onClick={handleSendAllergies} style={{ position: "absolute", left: "327px", top: "643px", cursor: allergies.trim() ? "pointer" : "default", width: "229px", height: "62px", opacity: allergies.trim() ? 1 : 0.4 }}>
+              {/* Pink rounded rect background */}
+              <svg width="229" height="72" viewBox="0 0 229 72" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ position: "absolute", top: 0, left: 0 }}>
+                <g filter="url(#filter0_d_132_2740)">
+                  <path d="M6 16C6 10.4772 10.4772 6 16 6H205C210.523 6 215 10.4772 215 16V48C215 53.5228 210.523 58 205 58H16C10.4772 58 6 53.5228 6 48V16Z" fill="#FF1DFF"/>
+                </g>
+                <defs>
+                  <filter id="filter0_d_132_2740" x="0" y="0" width="229" height="72" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+                    <feFlood floodOpacity="0" result="BackgroundImageFix"/>
+                    <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+                    <feOffset dx="4" dy="4"/>
+                    <feGaussianBlur stdDeviation="5"/>
+                    <feComposite in2="hardAlpha" operator="out"/>
+                    <feColorMatrix type="matrix" values="0 0 0 0 0.580435 0 0 0 0 0.580435 0 0 0 0 0.580435 0 0 0 1 0"/>
+                    <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_132_2740"/>
+                    <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_132_2740" result="shape"/>
+                  </filter>
+                </defs>
+              </svg>
+              {/* White text on top, centered */}
+              <div style={{ position: "absolute", left: 0, right: 0, top: "24px", display: "flex", justifyContent: "center" }}>
+                <svg width="185" height="15" viewBox="0 0 196 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M5.58005 14.44C4.32672 14.44 3.26672 14.22 2.40005 13.78C1.53338 13.34 0.913382 12.7133 0.540049 11.9C0.180049 11.0733 0.120049 10.0933 0.360049 8.95995L2.22005 0.239951H6.16005L4.26005 9.15995C4.16672 9.58662 4.17338 9.95995 4.28005 10.28C4.38672 10.5866 4.58005 10.8266 4.86005 11C5.14005 11.16 5.47338 11.24 5.86005 11.24C6.27338 11.24 6.62672 11.16 6.92005 11C7.22672 10.8266 7.48005 10.5866 7.68005 10.28C7.88005 9.95995 8.02672 9.58662 8.12005 9.15995L10.02 0.239951H13.96L12.08 9.05995C11.84 10.1533 11.4467 11.1066 10.9 11.92C10.3667 12.72 9.66005 13.34 8.78005 13.78C7.90005 14.22 6.83338 14.44 5.58005 14.44ZM16.3679 9.99995L17.0479 6.81995H19.7079C20.1345 6.81995 20.5079 6.73995 20.8279 6.57995C21.1479 6.41995 21.3945 6.19995 21.5679 5.91995C21.7545 5.62662 21.8479 5.29328 21.8479 4.91995C21.8479 4.53328 21.7145 4.18662 21.4479 3.87995C21.1812 3.57328 20.8145 3.41995 20.3479 3.41995H17.7679L18.4479 0.239951H21.0279C22.0679 0.239951 22.9545 0.446617 23.6879 0.85995C24.4212 1.27328 24.9812 1.81328 25.3679 2.47995C25.7545 3.14662 25.9479 3.86662 25.9479 4.63995C25.9479 5.53328 25.7679 6.31995 25.4079 6.99995C25.0479 7.66662 24.5479 8.22662 23.9079 8.67995C23.2812 9.11995 22.5612 9.45328 21.7479 9.67995C20.9345 9.89328 20.0679 9.99995 19.1479 9.99995H16.3679ZM12.6479 14.2L15.6279 0.239951H19.5679L16.5879 14.2H12.6479ZM25.4957 14.2L28.4557 0.239951H33.0557C33.989 0.239951 34.809 0.393284 35.5157 0.699951C36.2357 1.00662 36.8357 1.42662 37.3157 1.95995C37.7957 2.49328 38.1557 3.09995 38.3957 3.77995C38.6357 4.45995 38.7557 5.18662 38.7557 5.95995C38.7557 7.17328 38.549 8.28662 38.1357 9.29995C37.7357 10.3 37.1623 11.1666 36.4157 11.9C35.669 12.6333 34.7823 13.2 33.7557 13.6C32.7423 14 31.6157 14.2 30.3757 14.2H25.4957ZM30.1157 11H30.9757C31.5623 11 32.0823 10.86 32.5357 10.58C33.0023 10.3 33.389 9.92662 33.6957 9.45995C34.0157 8.99328 34.2557 8.47328 34.4157 7.89995C34.589 7.31328 34.6757 6.71995 34.6757 6.11995C34.6757 5.30662 34.4757 4.65328 34.0757 4.15995C33.689 3.66662 33.1557 3.41995 32.4757 3.41995H31.7157L30.1157 11ZM40.5635 11.62L41.2435 8.51995H49.7835L49.1035 11.62H40.5635ZM44.2435 0.239951H49.9435L50.1835 14.2H46.2435L46.4635 7.37995L46.5235 3.05995L44.7435 7.37995L42.0635 14.2H38.0835L44.2435 0.239951ZM55.1713 14.2L57.4713 3.41995H53.6113L54.2913 0.239951H65.9513L65.2713 3.41995H61.4113L59.1113 14.2H55.1713ZM64.8391 14.2L67.8191 0.239951H78.4991L77.8191 3.41995H71.0791L70.6391 5.49995H74.9191L74.2591 8.59995H69.9791L69.4591 11H76.2991L75.6191 14.2H64.8391ZM89.9747 14.2L93.6947 0.239951H98.1147L97.5947 5.95995L97.2347 8.91995L98.1147 5.95995L100.035 0.239951H104.595L102.375 14.2H98.9547L100.215 7.93995L101.075 3.83995L99.6947 7.93995L97.4747 14.2H94.8147L95.2747 7.93995L95.6547 3.75995L94.7547 7.93995L93.3147 14.2H89.9747ZM107.143 14.2L108.343 8.55995L105.943 0.239951H109.823L110.463 2.89995L110.863 5.69995L112.483 2.85995L114.223 0.239951H118.323L112.283 8.55995L111.083 14.2H107.143ZM135.638 14.44C134.638 14.44 133.752 14.22 132.978 13.78C132.205 13.3266 131.598 12.6933 131.158 11.88C130.732 11.0666 130.518 10.1133 130.518 9.01995C130.518 7.84662 130.672 6.71995 130.978 5.63995C131.298 4.55995 131.758 3.59995 132.358 2.75995C132.972 1.90662 133.725 1.23328 134.618 0.73995C135.525 0.246617 136.572 -4.95911e-05 137.758 -4.95911e-05C138.758 -4.95911e-05 139.638 0.21995 140.398 0.65995C141.172 1.08662 141.772 1.69995 142.198 2.49995C142.638 3.29995 142.858 4.25995 142.858 5.37995C142.858 6.55328 142.705 7.68662 142.398 8.77995C142.092 9.85995 141.632 10.8266 141.018 11.68C140.418 12.52 139.665 13.1933 138.758 13.7C137.865 14.1933 136.825 14.44 135.638 14.44ZM135.978 11.24C136.445 11.24 136.858 11.0733 137.218 10.74C137.592 10.4066 137.905 9.96662 138.158 9.41995C138.412 8.87328 138.605 8.26662 138.738 7.59995C138.872 6.91995 138.938 6.23995 138.938 5.55995C138.938 4.77328 138.798 4.17995 138.518 3.77995C138.238 3.37995 137.865 3.17995 137.398 3.17995C136.932 3.17995 136.518 3.34662 136.158 3.67995C135.798 4.01328 135.485 4.45328 135.218 4.99995C134.965 5.54662 134.772 6.15995 134.638 6.83995C134.505 7.50662 134.438 8.17995 134.438 8.85995C134.438 9.37995 134.505 9.81995 134.638 10.18C134.772 10.5266 134.952 10.7933 135.178 10.98C135.405 11.1533 135.672 11.24 135.978 11.24ZM146.626 9.33995L147.306 6.13995H150.066C150.639 6.13995 151.099 5.99995 151.446 5.71995C151.793 5.43995 151.966 5.07328 151.966 4.61995C151.966 4.27328 151.846 3.98662 151.606 3.75995C151.379 3.53328 151.046 3.41995 150.606 3.41995H147.886L148.566 0.239951H151.426C152.386 0.239951 153.213 0.413284 153.906 0.75995C154.599 1.09328 155.133 1.56662 155.506 2.17995C155.893 2.77995 156.086 3.48662 156.086 4.29995C156.086 5.05995 155.913 5.74662 155.566 6.35995C155.233 6.97328 154.766 7.50662 154.166 7.95995C153.566 8.39995 152.859 8.73995 152.046 8.97995C151.246 9.21995 150.379 9.33995 149.446 9.33995H146.626ZM142.746 14.2L145.726 0.239951H149.666L146.686 14.2H142.746ZM150.546 14.2C150.533 13.28 150.406 12.42 150.166 11.62C149.939 10.82 149.573 10.1266 149.066 9.53995C148.559 8.95328 147.893 8.52662 147.066 8.25995L151.266 7.39995C152.079 7.83995 152.719 8.40662 153.186 9.09995C153.653 9.79328 153.979 10.5733 154.166 11.44C154.366 12.3066 154.473 13.2266 154.486 14.2H150.546ZM155.574 14.2L158.534 0.239951H163.134C164.067 0.239951 164.887 0.393284 165.594 0.699951C166.314 1.00662 166.914 1.42662 167.394 1.95995C167.874 2.49328 168.234 3.09995 168.474 3.77995C168.714 4.45995 168.834 5.18662 168.834 5.95995C168.834 7.17328 168.627 8.28662 168.214 9.29995C167.814 10.3 167.24 11.1666 166.494 11.9C165.747 12.6333 164.86 13.2 163.834 13.6C162.82 14 161.694 14.2 160.454 14.2H155.574ZM160.194 11H161.054C161.64 11 162.16 10.86 162.614 10.58C163.08 10.3 163.467 9.92662 163.774 9.45995C164.094 8.99328 164.334 8.47328 164.494 7.89995C164.667 7.31328 164.754 6.71995 164.754 6.11995C164.754 5.30662 164.554 4.65328 164.154 4.15995C163.767 3.66662 163.234 3.41995 162.554 3.41995H161.794L160.194 11ZM168.902 14.2L171.882 0.239951H182.562L181.882 3.41995H175.142L174.702 5.49995H178.982L178.322 8.59995H174.042L173.522 11H180.362L179.682 14.2H168.902ZM185.649 9.33995L186.329 6.13995H189.089C189.663 6.13995 190.123 5.99995 190.469 5.71995C190.816 5.43995 190.989 5.07328 190.989 4.61995C190.989 4.27328 190.869 3.98662 190.629 3.75995C190.403 3.53328 190.069 3.41995 189.629 3.41995H186.909L187.589 0.239951H190.449C191.409 0.239951 192.236 0.413284 192.929 0.75995C193.623 1.09328 194.156 1.56662 194.529 2.17995C194.916 2.77995 195.109 3.48662 195.109 4.29995C195.109 5.05995 194.936 5.74662 194.589 6.35995C194.256 6.97328 193.789 7.50662 193.189 7.95995C192.589 8.39995 191.883 8.73995 191.069 8.97995C190.269 9.21995 189.403 9.33995 188.469 9.33995H185.649ZM181.769 14.2L184.749 0.239951H188.689L185.709 14.2H181.769ZM189.569 14.2C189.556 13.28 189.429 12.42 189.189 11.62C188.963 10.82 188.596 10.1266 188.089 9.53995C187.583 8.95328 186.916 8.52662 186.089 8.25995L190.289 7.39995C191.103 7.83995 191.743 8.40662 192.209 9.09995C192.676 9.79328 193.003 10.5733 193.189 11.44C193.389 12.3066 193.496 13.2266 193.509 14.2H189.569Z" fill="white"/>
+                </svg>
+
+              </div>
+            </div>
+
+          </div>
+        )}
+
         {/* Calendar */}
         <div style={{ position: "absolute", left: "160px", top: "530px", width: "520px", zIndex: 10 }}>
-          <CalendarWidget onDateSelect={setSelectedDate} />
+          <CalendarWidget onRangeSelect={(s, e) => { setStartDate(s); setEndDate(e); }} />
         </div>
 
         {/* Selected date display */}
-        {selectedDate && (
+        {startDate && endDate && (
           <div style={{
             position: "absolute", left: "100px", top: "840px",
             fontSize: "13px", color: "#555", fontFamily: "Arial, sans-serif", zIndex: 10
-          }}>Valgt dato: {selectedDate}</div>
+          }}>{startDate} → {endDate}</div>
         )}
 
         {/* vælg produkt */}
         <div style={{ position: "absolute", left: "130px", top: "900px", width: "560px", zIndex: 10 }}>
           <select
-            value={product}
-            onChange={e => setProduct(e.target.value)}
+            value={selectedProduct?.id ?? ""}
+            onChange={e => {
+              const p = products.find(p => p.id === +e.target.value);
+              setSelectedProduct(p ? { id: p.id, name: p.name } : null);
+            }}
             style={{
               width: "100%", background: "#B4B4B4", borderRadius: "10px",
               padding: "15px 20px", marginBottom: "10px", border: "none",
@@ -232,7 +477,7 @@ export default function CateringPage() {
           >
             <option value="" disabled>vælg produkt</option>
             {products.map(p => (
-              <option key={p.id} value={p.name}>{p.name} — {p.price} kr</option>
+              <option key={p.id} value={p.id}>{p.name} — {p.price} kr</option>
             ))}
           </select>
 
@@ -260,20 +505,67 @@ export default function CateringPage() {
           </div>
 
           {/* Order item rows */}
-          {[0,1,2,3,4].map(i => (
-            <div key={i} style={{
-              background: "#C0C0C0", borderRadius: "10px",
-              padding: "14px 16px", marginBottom: "8px", height: "48px",
-              fontSize: "15px", fontFamily: "Arial, sans-serif", color: "#444",
-              display: "flex", alignItems: "center", zIndex: 10
-            }}>
-              {orderItems[i] || ""}
-            </div>
-          ))}
+          <div style={{ height: "280px", overflowY: "scroll", overflowX: "hidden", scrollbarWidth: "none" }}>
+            {orderItems.map((item, i) => (
+              <div key={i} style={{
+                background: "#C0C0C0", borderRadius: "10px",
+                padding: "14px 16px", marginBottom: "8px", height: "48px",
+                fontFamily: "var(--font-azeret-mono), 'Azeret Mono', monospace",
+                fontWeight: 800, fontStyle: "italic",
+                fontSize: "15px", color: "#1E1E1E",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}>
+                {item.display}
+                <button
+                  onClick={() => setOrderItems(prev => prev.filter((_, j) => j !== i))}
+                  style={{
+                    background: "none", border: "none", cursor: "pointer",
+                    fontFamily: "var(--font-azeret-mono), 'Azeret Mono', monospace",
+                    fontWeight: 800, fontSize: "18px", color: "#1E1E1E", lineHeight: 1,
+                    padding: "0 4px", flexShrink: 0,
+                  }}
+                >×</button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Location input */}
+        <div style={{ position: "absolute", left: "130px", top: "1310px", width: "560px", zIndex: 10 }}>
+          <input
+            type="text"
+            placeholder="lokation"
+            value={location}
+            onChange={e => setLocation(e.target.value)}
+            style={{
+              width: "100%", background: "#C4C4C4", border: "none", borderRadius: "10px",
+              padding: "14px 16px", boxSizing: "border-box",
+              fontFamily: "var(--font-azeret-mono), 'Azeret Mono', monospace",
+              fontWeight: 800, fontStyle: "italic", fontSize: "18px", color: "#1E1E1E",
+              outline: "none",
+            }}
+          />
+        </div>
+
+        {/* Email input */}
+        <div style={{ position: "absolute", left: "130px", top: "1370px", width: "560px", zIndex: 10 }}>
+          <input
+            type="email"
+            placeholder="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            style={{
+              width: "100%", background: "#C4C4C4", border: "none", borderRadius: "10px",
+              padding: "14px 16px", boxSizing: "border-box",
+              fontFamily: "var(--font-azeret-mono), 'Azeret Mono', monospace",
+              fontWeight: 800, fontStyle: "italic", fontSize: "18px", color: "#1E1E1E",
+              outline: "none",
+            }}
+          />
         </div>
 
         {/* SEND BESTILLING blob-button */}
-        <div style={{ position: "absolute", left: "300px", top: "1400px", cursor: "pointer", zIndex: 10 }}>
+        <div onClick={handleSend} style={{ position: "absolute", left: "300px", top: "1460px", cursor: sending ? "wait" : "pointer", zIndex: 10, opacity: sending ? 0.6 : 1 }}>
           <svg width="212" height="143" viewBox="0 0 212 143" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M206.885 75.3225L203.699 91.2173L198.614 107.914L185.145 121.839L167.787 133.278L144.048 133.703L124.508 143L102.32 140.535L81.5293 135.97L57.4378 138.047L36.0523 130.707L26.9357 112.451L13.2246 99.8315L7.58516 84.0046L0 67.7851L2.72522 50.4077L15.7651 36.1944L26.6022 20.51L46.9596 12.575L65.6517 2.15851L88.3222 0L110.629 1.78247L132.599 3.15576L154.118 7.63844L175.897 13.6568L188.805 28.8458L201.452 42.7345L212 58.0859L206.885 75.3225Z" fill="#FF1DFF"/>
           </svg>
@@ -285,6 +577,13 @@ export default function CateringPage() {
             fontSize: "16px", color: "#1E1E1E", textAlign: "center", lineHeight: 1.25,
           }}>SEND<br/>BESTILLING</div>
         </div>
+        {sendError && (
+          <div style={{
+            position: "absolute", left: "130px", top: "1615px", zIndex: 10,
+            fontFamily: "var(--font-azeret-mono), 'Azeret Mono', monospace",
+            fontWeight: 800, fontStyle: "italic", fontSize: "14px", color: "#FF1DFF",
+          }}>{sendError}</div>
+        )}
 
         {/* ── PINK MAGENTA BLOB (top right) ── */}
         <svg style={{ position: "absolute", left: "700px", top: "385px" }} width="393" height="241" viewBox="0 0 393 241" fill="none" xmlns="http://www.w3.org/2000/svg">

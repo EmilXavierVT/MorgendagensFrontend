@@ -1,5 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const authHeader = req.headers.get("Authorization");
+  try {
+    const body = await req.json();
+    const res = await fetch(
+      `https://morgendagens.project-ice.dk/api/request/${id}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: authHeader ?? "" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+  } catch (e) {
+    console.error("Request PUT proxy error", e);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

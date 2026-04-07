@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import LoginModal from "./LoginModal";
-import { checkLoggedIn } from "@/lib/token";
+import { checkLoggedIn, isAdmin } from "@/lib/token";
 
 function subscribe(cb: () => void) {
   window.addEventListener("storage", cb);
@@ -12,7 +12,7 @@ function subscribe(cb: () => void) {
 const getSnapshot = () => checkLoggedIn();
 const getServerSnapshot = () => false;
 
-type Page = "home" | "about" | "user" | "catering";
+type Page = "home" | "about" | "user" | "catering" | "admin";
 
 const CateringPath = () => (
   <>
@@ -26,6 +26,12 @@ const CateringPath = () => (
 export default function Navbar({ activePage }: { activePage: Page }) {
   const [showLogin, setShowLogin] = useState(false);
   const isLoggedIn = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const adminIcon = (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="#1E1E1E" xmlns="http://www.w3.org/2000/svg">
+      <path fill="none" d="M0 0h24v24H0z"/>
+      <path d="M12 14v8H4a8 8 0 0 1 8-8zm0-1c-3.315 0-6-2.685-6-6s2.685-6 6-6 6 2.685 6 6-2.685 6-6 6zm9 4h1v5h-8v-5h1v-1a3 3 0 0 1 6 0v1zm-2 0v-1a1 1 0 0 0-2 0v1h2z"/>
+    </svg>
+  );
   const homeIcon = (
     <svg width="28" height="31" viewBox="0 0 28 31" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M9.75 29.5833V15.4167H18.25V29.5833M1.25 11.1667L14 1.25L26.75 11.1667V26.75C26.75 27.5014 26.4515 28.2221 25.9201 28.7535C25.3888 29.2848 24.6681 29.5833 23.9167 29.5833H4.08333C3.33189 29.5833 2.61122 29.2848 2.07986 28.7535C1.54851 28.2221 1.25 27.5014 1.25 26.75V11.1667Z" stroke="#1E1E1E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -65,6 +71,17 @@ export default function Navbar({ activePage }: { activePage: Page }) {
         <Link href="/catering" style={{ position: "absolute", left: "90px", top: "3px", display: "block", width: "34px", height: "34px" }}>
           {cateringIcon}
         </Link>
+      )}
+
+      {/* Admin icon — only shown to admin users */}
+      {isLoggedIn && isAdmin() && (
+        activePage === "admin" ? (
+          <div style={{ position: "absolute", left: "1063px", top: "5px" }}>{adminIcon}</div>
+        ) : (
+          <Link href="/admin" style={{ position: "absolute", left: "1063px", top: "5px", display: "block" }}>
+            {adminIcon}
+          </Link>
+        )
       )}
 
       {/* User icon */}

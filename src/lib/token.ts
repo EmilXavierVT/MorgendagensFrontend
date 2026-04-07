@@ -1,6 +1,7 @@
 let cachedToken: string | null = null;
 let cachedUserId: string | null = null;
 let cachedCateringToken: string | null = null;
+let cachedRole: string | null = null;
 
 /** Returns the logged-in user's token (persisted in localStorage). */
 export function getToken(): string | null {
@@ -79,14 +80,36 @@ export function checkLoggedIn(): boolean {
   return true;
 }
 
+export function setRole(role: string) {
+  cachedRole = role;
+  if (typeof window !== "undefined") {
+    localStorage.setItem("userRole", role);
+  }
+}
+
+export function getRole(): string | null {
+  if (cachedRole) return cachedRole;
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("userRole");
+  }
+  return null;
+}
+
+export function isAdmin(): boolean {
+  const role = getRole();
+  return role === "ADMIN";
+}
+
 export function logout() {
   cachedToken = null;
   cachedUserId = null;
   cachedCateringToken = null;
+  cachedRole = null;
   if (typeof window !== "undefined") {
     localStorage.removeItem("isLoggedIn");
     localStorage.removeItem("loginExpiry");
     localStorage.removeItem("userId");
     localStorage.removeItem("userToken");
+    localStorage.removeItem("userRole");
   }
 }

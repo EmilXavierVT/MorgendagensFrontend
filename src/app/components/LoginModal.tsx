@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { setToken, setLoggedIn, setUserId } from "@/lib/token";
+import { setToken, setLoggedIn, setUserId, setRole } from "@/lib/token";
 
 interface LoginModalProps {
   onClose: () => void;
@@ -58,6 +58,8 @@ export default function LoginModal({ onClose, onSuccess }: LoginModalProps) {
         if (token) setToken(token);
         const userId = data.id;
         if (userId) setUserId(String(userId));
+        const role = data.role ?? data.roles?.[0];
+        if (role) setRole(String(role));
         setLoggedIn();
         if (onSuccess) {
           onSuccess();

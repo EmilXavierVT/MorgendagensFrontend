@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Navbar from "../components/Navbar";
 import LoginModal from "../components/LoginModal";
-import { getToken, getUserId } from "@/lib/token";
+import { getToken, getUserId, logout } from "@/lib/token";
 
 const DESIGN_WIDTH = 1146;
 const DESIGN_HEIGHT = 2100;
@@ -29,6 +29,12 @@ interface ProductInRequest {
   product: Product;
 }
 
+interface ProductDisplay {
+  name: string;
+  price: number;
+  time: string;
+}
+
 interface Request {
   id: number;
   tenantId: number;
@@ -46,6 +52,11 @@ export default function UserPage() {
   const [selectedRequest, setSelectedRequest] = useState<Request | null>(null);
   const [selectedProducts, setSelectedProducts] = useState<ProductInRequest[]>([]);
   const [showLogin, setShowLogin] = useState(false);
+  const [requestProducts, setRequestProducts] = useState<Record<number, ProductDisplay[]>>({});
+  const [mounted, setMounted] = useState(false);
+  const [user, setUser] = useState<{ firstName?: string; email?: string; tenantId?: number } | null>(null);
+
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     async function loadRequests() {
@@ -54,6 +65,11 @@ export default function UserPage() {
       try {
         const token = getToken();
         if (!token) { setShowLogin(true); return; }
+        const userRes = await fetch(`/api/user/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (userRes.ok) setUser(await userRes.json());
+
         const res = await fetch(`/api/request/user/${userId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -61,6 +77,34 @@ export default function UserPage() {
           const data: Request[] = await res.json();
           setRequests(data);
           if (data.length > 0) selectRequest(data[0]);
+          const productsMap: Record<number, ProductDisplay[]> = {};
+          await Promise.all(data.map(async (req) => {
+            try {
+              const reqRes = await fetch(`/api/request/${req.id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (!reqRes.ok) return;
+              const reqData = await reqRes.json();
+              const pirIds: number[] = reqData.productInRequestIds ?? [];
+              const products = await Promise.all(pirIds.map(async (pirId) => {
+                const pirRes = await fetch(`/api/product-in-requests/${pirId}`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!pirRes.ok) return null;
+                const pir = await pirRes.json();
+                const pRes = await fetch(`/api/product/${pir.productId}`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!pRes.ok) return null;
+                const p = await pRes.json();
+                return { name: p.name, price: p.price, time: pir.time } as ProductDisplay;
+              }));
+              productsMap[req.id] = products.filter((p): p is ProductDisplay => p !== null);
+            } catch (e) {
+              console.error(`Failed to load products for request ${req.id}`, e);
+            }
+          }));
+          setRequestProducts(productsMap);
         }
       } catch (e) {
         console.error("Failed to load requests", e);
@@ -95,6 +139,8 @@ export default function UserPage() {
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
+
+  if (!mounted) return null;
 
   return (
     <>
@@ -137,9 +183,11 @@ export default function UserPage() {
           position: "absolute", left: "470px", top: "230px",
           ...mono, fontSize: "28px", lineHeight: "1.6", color: "#1E1E1E",
         }}>
-          navn<br />
-          tenant<br />
-          dato på sidste ordre
+          {user?.firstName ?? user?.email ?? "—"}<br />
+          {user?.tenantId ?? "—"}<br />
+          {requests.length > 0
+            ? new Date(requests[requests.length - 1].startDate).toLocaleDateString("da-DK")
+            : "—"}
         </div>
 
         {/* ── BLUE SIDE BLOB ── */}
@@ -182,9 +230,9 @@ export default function UserPage() {
               <div style={{ marginBottom: "10px", fontSize: "12px", opacity: 0.8 }}>
                 {new Date(selectedRequest.startDate).toLocaleDateString("da-DK")} → {new Date(selectedRequest.endDate).toLocaleDateString("da-DK")}
               </div>
-              {selectedProducts.map(pir => (
-                <div key={pir.id} style={{ marginBottom: "4px" }}>
-                  {pir.product?.name} — {pir.product?.price} kr — {pir.time}
+              {(requestProducts[selectedRequest.id] ?? []).map((p, i) => (
+                <div key={i} style={{ marginBottom: "4px" }}>
+                  {p.name} — {p.price} kr — {p.time}
                 </div>
               ))}
             </>
@@ -192,12 +240,16 @@ export default function UserPage() {
         </div>
 
         {/* ── ORDER CARDS ── */}
-        {requests.map((req, idx) => {
-          const topOffset = 530 + idx * 360;
+        <div style={{
+          position: "absolute", left: "590px", top: "530px",
+          width: "523px", height: "720px",
+          overflowY: "scroll", overflowX: "hidden",
+        }}>
+        {requests.map((req) => {
           return (
             <div key={req.id}
               onClick={() => selectRequest(req)}
-              style={{ position: "absolute", left: "490px", top: `${topOffset}px`, width: "523px", cursor: "pointer" }}>
+              style={{ position: "relative", width: "523px", height: "360px", cursor: "pointer", flexShrink: 0 }}>
               {/* Black blob background */}
               <svg style={{ position: "absolute", top: 0, left: 0 }} width="523" height="339" viewBox="0 0 523 339" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <g clipPath="url(#clip0_44_141)">
@@ -225,6 +277,31 @@ export default function UserPage() {
             </div>
           );
         })}
+        </div>
+
+        {/* ── LOGOUT BUTTON ── */}
+        <div
+            onClick={() => { logout(); window.location.href = "/"; }}
+            style={{ position: "absolute", left: "700px", top: "1250px", width: "335px", height: "271px", cursor: "pointer" }}
+          >
+            <svg width="335" height="271" viewBox="0 0 335 271" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <g clipPath="url(#clip0_345_230)">
+                <path d="M12.6561 144.918L16.7651 118.012L48.3119 112.577L69.1279 94.5448L99.4053 92.3233L126.614 82.4613L157.862 85.8301L186.693 76.4846L217.757 77.1526L249.209 81.5344L278.584 96.6151L311.367 103.665L325.91 131.446L316.75 154.816L296.944 173.36L271.044 185.686L238.629 183.9L209.565 187.589L181.21 195.101L151.507 200.675L120.092 188.776L89.6326 187.611L58.7172 182.454L32.1762 165.671L12.6561 144.918Z" fill="#0496FF"/>
+              </g>
+              <defs>
+                <clipPath id="clip0_345_230">
+                  <rect width="171.136" height="290.563" fill="white" transform="translate(334.309 113.388) rotate(112.969)"/>
+                </clipPath>
+              </defs>
+            </svg>
+            <div style={{
+              position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              ...mono, fontSize: "32px", color: "white", pointerEvents: "none",
+            }}>
+              logout
+            </div>
+        </div>
 
         {/* ── PINK FOOTER DECORATION ── */}
         <svg style={{ position: "absolute", left: "166px", top: "1450px" }} width="814" height="300" viewBox="0 0 814 300" fill="none" xmlns="http://www.w3.org/2000/svg">

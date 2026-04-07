@@ -368,13 +368,13 @@ export default function Home() {
           left: "162px",
           top: "1951px",
           ...azeretMono,
-          fontSize: "50px",
+          fontSize: "30px",
           lineHeight: "58px",
           textAlign: "center",
           color: "#FFFFFF",
         }}
       >
-        cvr, navn, email
+          CVR: 46164164 - MORGENDAGENS MÅLTID kontakt@morgendagensmaaltid.dk
       </div>
     </div>
     </div>
